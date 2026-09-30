@@ -95,9 +95,9 @@ python -m gpt_lab.train --config configs/modern_124m_fineweb10b.yaml
 # after any interruption (Ctrl-C, reboot, crash):
 python -m gpt_lab.train --config configs/modern_124m_fineweb10b.yaml --resume
 ```
-Pressing Ctrl-C saves a checkpoint before exiting. Checkpoints are also written every 500
-steps. Tips for a long run: pause Windows Update and turn off sleep. You can also run
-inside `tmux` so that closing the terminal does not stop training.
+Pressing Ctrl-C (or sending SIGTERM) saves a checkpoint before exiting. Checkpoints are also
+written every 500 steps. Tips for a long run: pause Windows Update and turn off sleep. You can
+also run inside `tmux` so that closing the terminal does not stop training.
 
 ### 5. Evaluate and compare with GPT-2
 ```bash
@@ -120,7 +120,9 @@ A modern architecture should match or beat that.
 Every run is described by a YAML file in `configs/` (see `src/gpt_lab/config.py` for all
 fields and defaults). Any field can be overridden with `--section.key=value`, for example
 `--model.n_kv_head=4 --train.lr=1.5e-3`. Each run directory `runs/<run_name>/` stores the
-resolved `config.yaml`, the git commit, TensorBoard logs, checkpoints and `eval.json`.
+resolved `config.yaml`, the git commit, TensorBoard logs, checkpoints and `eval.json`, plus
+two files for tools that follow a run: `metrics.jsonl` (every logged metric and text sample,
+one JSON object per line) and `status.json` (state, step, process ID, latest checkpoint).
 
 ## Development
 

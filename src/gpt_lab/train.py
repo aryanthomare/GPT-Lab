@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
+import signal
 import subprocess
+import threading
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -31,7 +34,7 @@ from gpt_lab.data import ShardedLoader
 from gpt_lab.evals.val_loss import evaluate_val_loss
 from gpt_lab.model import Transformer, configure_optimizer
 from gpt_lab.schedule import lr_at
-from gpt_lab.tracking import Tracker
+from gpt_lab.tracking import Tracker, write_status
 
 
 def resolve_device(name: str) -> str:
@@ -59,12 +62,20 @@ def _git_commit() -> str:
         return "unknown"
 
 
+def _raise_keyboard_interrupt(signum, frame) -> None:
+    raise KeyboardInterrupt
+
+
 def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict[str, Any]:
     """Run training. Returns {"losses": [...per step...], "final_step": int, ...metrics}.
 
     stop_at: stop after this many completed steps without changing the schedule
     (the learning-rate schedule still uses train.max_steps). Useful for tests and
     for splitting a long run into sessions.
+
+    The run directory's status.json has a "state" of starting, running, finished,
+    stopped (at stop_at), interrupted (Ctrl-C or SIGTERM, after saving a checkpoint) or
+    failed. A non-final state whose "pid" is no longer alive means the process died.
     """
     tc, mc, dc = cfg.train, cfg.model, cfg.data
     device = resolve_device(tc.device)
@@ -78,6 +89,25 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
     run_dir = tc.run_dir
     ckpt_dir = run_dir / "checkpoints"
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    status: dict[str, Any] = {
+        "state": "starting",
+        "run_name": tc.run_name,
+        "pid": os.getpid(),
+        "started_at": time.time(),
+        "updated_at": time.time(),
+        "step": 0,
+        "max_steps": tc.max_steps,
+        "end_step": None,
+        "last_checkpoint": None,
+        "error": None,
+    }
+
+    def set_status(**changes: Any) -> None:
+        status.update(changes, updated_at=time.time())
+        write_status(run_dir / "status.json", status)
+
+    set_status()
 
     tokens_per_micro = tc.micro_batch_size * mc.seq_len
     if tc.total_batch_tokens % tokens_per_micro != 0:
@@ -107,13 +137,14 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
             if is_cuda and ckpt.get("cuda_rng") is not None:
                 torch.cuda.set_rng_state_all([s.cpu() for s in ckpt["cuda_rng"]])
             start_step = ckpt["step"]
+            status["last_checkpoint"] = path.relative_to(run_dir).as_posix()
             print(f"[train] resumed from {path} at step {start_step}")
 
     save_config(cfg, run_dir / "config.yaml")
     (run_dir / "git_commit.txt").write_text(_git_commit() + "\n")
 
     fwd_model = torch.compile(model) if (tc.compile and is_cuda) else model
-    tracker = Tracker(run_dir / "tb")
+    tracker = Tracker(run_dir / "tb", metrics_path=run_dir / "metrics.jsonl", start_step=start_step)
     flops_per_token = model.flops_per_token()
     tracker.print(
         f"model params {model.num_params() / 1e6:.1f}M | device {device} | "
@@ -134,6 +165,7 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
             loader_state=loader_state,
         )
         prune_checkpoints(ckpt_dir, tc.keep_last, tc.keep_every)
+        set_status(last_checkpoint=path.relative_to(run_dir).as_posix())
         tracker.print(f"saved checkpoint {path}")
 
     def periodic(completed: int, final: bool) -> dict[str, float]:
@@ -204,7 +236,13 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
     safe_step, safe_loader_state = start_step, loader.state_dict()
     t_last = time.time()
     tokens_since = 0
+    handles_sigterm = threading.current_thread() is threading.main_thread()
+    prev_sigterm = None
+    set_status(state="running", step=start_step, end_step=end_step)
     try:
+        if handles_sigterm:
+            # SIGTERM (from process managers, or a UI's stop button) takes the Ctrl-C path.
+            prev_sigterm = signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
         for step in range(start_step, end_step):
             if is_cuda:
                 torch.cuda.reset_peak_memory_stats()
@@ -244,6 +282,7 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
                 raise FloatingPointError(f"loss is {loss_val} at step {step}")
             completed = step + 1
             tokens_since += tc.total_batch_tokens
+            set_status(step=completed)
 
             if tc.log_every and (completed % tc.log_every == 0 or completed == end_step):
                 dt = time.time() - t_last
@@ -277,11 +316,18 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
                 t_last, tokens_since = time.time(), 0  # don't count eval time as training
             if tc.ckpt_every and (completed % tc.ckpt_every == 0 or completed == end_step):
                 save(completed, loader.state_dict())
+        set_status(state="finished" if safe_step >= tc.max_steps else "stopped", step=safe_step)
     except KeyboardInterrupt:
         tracker.print(f"interrupted; saving checkpoint at step {safe_step}")
         save(safe_step, safe_loader_state)
+        set_status(state="interrupted", step=safe_step)
+    except Exception as e:
+        set_status(state="failed", error=repr(e))
+        raise
     finally:
         tracker.close()
+        if handles_sigterm:
+            signal.signal(signal.SIGTERM, prev_sigterm or signal.SIG_DFL)
 
     return {"losses": losses, "final_step": start_step + len(losses), **last_metrics}
 
