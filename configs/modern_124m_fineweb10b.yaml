@@ -1,0 +1,54 @@
+# Main run: modern 124M-parameter model, FineWeb-Edu 10B tokens, one RTX 5080.
+# Anything here can be overridden on the command line, e.g. --train.micro_batch_size=32
+model:
+  vocab_size: 50304        # GPT-2 tokenizer (50,257) padded for speed
+  seq_len: 1024
+  n_layer: 12
+  n_head: 12
+  n_kv_head: null          # null = standard multi-head attention
+  d_model: 768             # SwiGLU hidden = 2048 -> ~123.6M params, same as GPT-2 small
+  rope_theta: 10000.0
+  qk_norm: true
+  tie_embeddings: true
+  activation_checkpointing: false
+
+data:
+  train_pattern: data/fineweb_edu_10B/train_*.npy
+  val_pattern: data/fineweb_edu_10B/val_*.npy
+  hellaswag_path: data/hellaswag/hellaswag_val.jsonl
+  seed: 1337
+
+train:
+  run_name: modern_124m_fineweb10b
+  out_dir: runs
+  device: auto
+  dtype: bfloat16
+  compile: true
+  seed: 1337
+
+  micro_batch_size: 16     # set from scripts/benchmark.py
+  total_batch_tokens: 524288   # 2^19 tokens per optimizer step
+  max_steps: 19073         # ~10B tokens
+
+  lr: 1.0e-3
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+
+  schedule: wsd
+  warmup_steps: 700
+  decay_frac: 0.2
+  min_lr_ratio: 0.0
+
+  log_every: 10
+  eval_every: 250
+  val_tokens: 10485760     # 10M validation tokens
+  hellaswag_every: 1000
+  hellaswag_limit: null    # all 10,042 examples (a few minutes each time)
+  sample_every: 1000
+  sample_max_tokens: 64
+  ckpt_every: 500          # ~30-60 minutes of training
+  keep_last: 2
+  keep_every: 5000
+  peak_tflops: null

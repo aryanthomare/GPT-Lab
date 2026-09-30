@@ -1,0 +1,26 @@
+# Stretch config: ~360M parameters (GPT-2 medium scale). Roughly 3x slower per token than 124M.
+# Start from micro_batch_size 8 and check scripts/benchmark.py; enable activation
+# checkpointing if memory is tight.
+model:
+  vocab_size: 50304
+  seq_len: 1024
+  n_layer: 24
+  n_head: 16
+  d_model: 1024
+  qk_norm: true
+  tie_embeddings: true
+  activation_checkpointing: false
+
+data:
+  train_pattern: data/fineweb_edu_10B/train_*.npy
+  val_pattern: data/fineweb_edu_10B/val_*.npy
+
+train:
+  run_name: modern_350m_fineweb
+  micro_batch_size: 8
+  total_batch_tokens: 524288
+  max_steps: 19073
+  lr: 6.0e-4
+  warmup_steps: 700
+  schedule: wsd
+  decay_frac: 0.2

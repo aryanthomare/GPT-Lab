@@ -1,0 +1,31 @@
+# Smoke test: a tiny model that trains on CPU in about a minute.
+# Prepare data first: python scripts/prepare_tiny.py
+model:
+  vocab_size: 50304
+  seq_len: 128
+  n_layer: 2
+  n_head: 4
+  d_model: 64
+  ffn_multiple_of: 32
+
+data:
+  train_pattern: data/tiny/train_*.npy
+  val_pattern: data/tiny/val_*.npy
+
+train:
+  run_name: tiny_cpu
+  device: cpu
+  dtype: float32
+  compile: false
+  micro_batch_size: 8
+  total_batch_tokens: 2048   # 8 x 128 x 2 accumulation steps
+  max_steps: 100
+  lr: 3.0e-3
+  warmup_steps: 10
+  log_every: 10
+  eval_every: 50
+  val_tokens: 16384
+  hellaswag_every: 0
+  sample_every: 50
+  sample_max_tokens: 32
+  ckpt_every: 50
