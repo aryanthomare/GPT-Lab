@@ -9,7 +9,8 @@ from .conftest import VOCAB, tiny_model_config
 def test_forward_shapes_and_loss(model_cfg):
     model = Transformer(model_cfg)
     idx = torch.randint(0, VOCAB, (3, 20))
-    logits, loss = model(idx, idx)
+    targets = torch.randint(0, VOCAB, (3, 20))
+    logits, loss = model(idx, targets)
     assert logits.shape == (3, 20, VOCAB)
     assert loss.ndim == 0
     # Near-uniform predictions at initialization.
