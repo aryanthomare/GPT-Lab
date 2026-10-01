@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 
-def _lm_eval_score(vals: dict) -> float | None:
+def lm_eval_score(vals: dict) -> float | None:
     for key in ("acc_norm,none", "acc,none"):
         if key in vals:
             return vals[key]
@@ -29,7 +29,7 @@ def build_table(results: list[dict]) -> str:
             f"{r['hellaswag_acc_norm']:.4f}" if "hellaswag_acc_norm" in r else "",
         ]
         for t in tasks:
-            score = _lm_eval_score(r.get("lm_eval", {}).get(t, {}))
+            score = lm_eval_score(r.get("lm_eval", {}).get(t, {}))
             row.append(f"{score:.4f}" if score is not None else "")
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)

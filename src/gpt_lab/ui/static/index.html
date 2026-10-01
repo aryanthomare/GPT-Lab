@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPT-Lab</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' fill='none' stroke='%2316222b' stroke-width='2'/%3E%3Cpath d='M4 11 L7 7 L9 9 L12 4' fill='none' stroke='%232a78d6' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&family=B612+Mono:wght@400;700&display=swap">
+  <link rel="stylesheet" href="/static/app.css?v={{v}}">
+  <script>
+    // Apply the saved theme before the first paint.
+    try {
+      const theme = localStorage.getItem("gptlab-theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="wordmark" href="#/runs">GPT-LAB</a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#/runs" data-nav="runs">Runs</a>
+      <a href="#/new" data-nav="new">New run</a>
+      <a href="#/data" data-nav="data">Data</a>
+      <a href="#/evaluate" data-nav="evaluate">Evaluate</a>
+      <a href="#/generate" data-nav="generate">Generate</a>
+    </nav>
+    <div class="gpu" id="gpu"></div>
+    <details class="menu" id="menu">
+      <summary class="btn quiet small" aria-label="Settings">Settings</summary>
+      <div class="menu-pop">
+        <span class="label">Theme</span>
+        <div class="segmented" id="theme">
+          <button type="button" data-theme="system">System</button>
+          <button type="button" data-theme="light">Light</button>
+          <button type="button" data-theme="dark">Dark</button>
+        </div>
+        <span class="label">Server</span>
+        <button type="button" class="btn small" id="shutdown">Shut down server</button>
+      </div>
+    </details>
+  </header>
+  <div class="offline" id="offline" hidden>
+    Can't reach the GPT-Lab server. Start it from Windows with Start-GPTLabUI.ps1, or run
+    <code>python -m gpt_lab.ui</code> in Ubuntu.
+  </div>
+  <main id="main"></main>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <dialog id="shutdown-dialog">
+    <h3>Shut down the GPT-Lab server?</h3>
+    <p id="shutdown-text">This page stops updating. Unless an Ubuntu terminal is open, WSL shuts down a few seconds later.</p>
+    <div class="actions">
+      <button type="button" class="btn quiet" value="cancel" id="shutdown-cancel">Cancel</button>
+      <button type="button" class="btn" id="shutdown-force" hidden>Shut down anyway</button>
+      <button type="button" class="btn primary" id="shutdown-confirm">Shut down</button>
+    </div>
+  </dialog>
+  <script type="module" src="/static/app.js?v={{v}}"></script>
+</body>
+</html>

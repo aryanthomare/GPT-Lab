@@ -16,7 +16,7 @@ jobs:
       - name: Install CPU PyTorch
         run: pip install "torch>=2.7" --index-url https://download.pytorch.org/whl/cpu
       - name: Install package
-        run: pip install -e ".[dev]" transformers
+        run: pip install -e ".[dev,ui]" transformers
       - name: Lint
         run: ruff check .
       - name: Test

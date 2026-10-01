@@ -26,7 +26,8 @@ src/gpt_lab/
   compare.py        results table               python -m gpt_lab.compare
   evals/            validation loss, HellaSwag, lm-evaluation-harness adapter
   hf_reference.py   Hugging Face GPT-2 wrapper for comparisons
-scripts/            dataset preparation, GPU benchmark
+  ui/               local web UI                python -m gpt_lab.ui
+scripts/            dataset preparation, GPU benchmark, UI launchers
 tests/              CPU-only unit tests (pytest)
 ```
 
@@ -96,8 +97,9 @@ python -m gpt_lab.train --config configs/modern_124m_fineweb10b.yaml
 python -m gpt_lab.train --config configs/modern_124m_fineweb10b.yaml --resume
 ```
 Pressing Ctrl-C (or sending SIGTERM) saves a checkpoint before exiting. Checkpoints are also
-written every 500 steps. Tips for a long run: pause Windows Update and turn off sleep. You can
-also run inside `tmux` so that closing the terminal does not stop training.
+written every 500 steps. Tips for a long run: pause Windows Update and turn off sleep.
+**Keep an Ubuntu terminal open, or use the web UI** (below). WSL shuts Ubuntu down a few
+seconds after its last terminal closes, and that stops training even inside `tmux` or `nohup`.
 
 ### 5. Evaluate and compare with GPT-2
 ```bash
@@ -114,6 +116,29 @@ python -m gpt_lab.compare runs/*/eval.json runs/reference/*.json
 OpenAI GPT-2 124M reaches about 3.29 FineWeb-Edu validation loss and about 29.5% HellaSwag.
 A GPT-2-architecture model trained on 10B FineWeb-Edu tokens reaches about 30-31% HellaSwag.
 A modern architecture should match or beat that.
+
+## Web UI
+
+A local web app for everything above: start runs from a preset (with any setting changed),
+watch loss, HellaSwag, throughput and samples live, stop and resume, prepare datasets,
+evaluate checkpoints against GPT-2, and generate text.
+
+```bash
+pip install -e ".[ui]"
+python -m gpt_lab.ui          # then open http://localhost:8000, from Windows too
+```
+
+From Windows, `scripts/windows/Start-GPTLabUI.ps1` starts the server in WSL (unless it's
+already running) and opens the browser:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File \\wsl.localhost\Ubuntu\home\<you>\GPT-Lab\scripts\windows\Start-GPTLabUI.ps1
+```
+
+The server runs under a hidden `wsl.exe`, which also keeps WSL running, so training carries
+on after you close every terminal and browser tab. Stop it with Settings > Shut down server.
+Jobs the UI starts run in sessions of their own, so restarting the server doesn't touch
+them. The server only answers on localhost, and its log is `runs/.ui-server.log`.
 
 ## Configuration
 

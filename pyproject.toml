@@ -22,10 +22,14 @@ dependencies = [
 [project.optional-dependencies]
 data = ["datasets>=2.19"]
 eval = ["transformers>=4.44", "lm-eval>=0.4.3"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+ui = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8.0", "ruff>=0.5", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"gpt_lab.ui" = ["static/*"]
 
 [tool.ruff]
 line-length = 100
