@@ -117,6 +117,7 @@ def test_training_run_end_to_end(client):
 
     listed = client.get("/api/runs").json()
     assert listed[0]["name"] == "e2e" and listed[0]["state"] == "finished"
+    assert [p[0] for p in listed[0]["loss_trend"]] == [1, 2, 3, 4, 5, 6]  # for the sparkline
     # The run reports "finished" just before its process exits and the job records that.
     job = wait_for(lambda: (j := client.get("/api/jobs").json()[0])["state"] != "running" and j)
     assert job["state"] == "succeeded" and job["run"] == "e2e"

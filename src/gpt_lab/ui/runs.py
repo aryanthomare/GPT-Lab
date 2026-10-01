@@ -111,10 +111,13 @@ def metrics_summary(path: Path) -> dict[str, Any]:
     train: dict[str, Any] = {}
     evals: dict[str, Any] = {}
     samples: dict[str, dict[str, Any]] = {}
+    losses: list[list[float]] = []
     best_val = None
     for row in read_metrics(path)["rows"]:
         if "train/loss" in row:
             train = row
+            if row["train/loss"] is not None:
+                losses.append([row["step"], row["train/loss"]])
         for k, v in row.items():
             if k.startswith("eval/") and v is not None:
                 evals[k] = v
@@ -133,9 +136,18 @@ def metrics_summary(path: Path) -> dict[str, Any]:
         "best_val_loss": best_val,
         "hellaswag": evals.get("eval/hellaswag_acc_norm"),
         "samples": sorted(samples.values(), key=lambda s: s["tag"]),
+        "loss_trend": _downsample(losses, 48),
     }
     _summary_cache[str(path)] = (key, summary)
     return summary
+
+
+def _downsample(points: list, n: int) -> list:
+    """At most n evenly spaced points, always keeping the last one."""
+    if len(points) <= n:
+        return points
+    idx = {round(i * (len(points) - 1) / (n - 1)) for i in range(n)}
+    return [points[i] for i in sorted(idx)]
 
 
 # -- logs and checkpoints -----------------------------------------------------------------
@@ -212,6 +224,7 @@ def summarize(path: Path, active_job: dict[str, Any] | None = None) -> dict[str,
         "model": {k: mc.get(k) for k in ("n_layer", "n_head", "d_model", "seq_len", "vocab_size")},
         "job": active_job["id"] if active_job else None,
         "has_eval": (path / "eval.json").exists(),
+        "loss_trend": m.get("loss_trend", []),
         **{
             k: m.get(k)
             for k in ("loss", "val_loss", "best_val_loss", "hellaswag", "tokens_per_sec")

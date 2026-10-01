@@ -1,6 +1,8 @@
 // GPT-Lab UI: a small single-page app over the JSON API in gpt_lab/ui/app.py.
 // Text from the server always goes into the page through textContent (see h()).
 
+import { modelSpec, modelView, paramBar } from "./model3d.js";
+
 const main = document.getElementById("main");
 
 // ---- DOM helpers ------------------------------------------------------------------------
@@ -279,12 +281,13 @@ function nearest(pts, x) {
 let chartIds = 0;
 
 // A line chart over metric series. update(seriesByKey, {xMax}) redraws it.
-function lineChart({ title, series, format, tick = format, clip = false, zero = false, emptyText = "Nothing logged yet." }) {
+function lineChart({ title, series, format, tick = format, clip = false, zero = false, emptyText = "Nothing logged yet.", headline = null }) {
   const id = ++chartIds;
   const now = h("span", { class: "chart-now" });
   const tableBtn = h("button", { class: "btn small quiet", type: "button", "aria-pressed": "false", text: "Table" });
   const legend = series.length > 1
-    ? h("div", { class: "chart-legend" }, series.map((sr) => h("span", {}, h("span", { class: "key", style: { background: sr.color } }), sr.label)))
+    ? h("div", { class: "chart-legend" }, series.map((sr) => h("span", {},
+        h("span", { class: "key", style: sr.track ? { background: sr.color, height: "6px", opacity: 0.3 } : { background: sr.color } }), sr.label)))
     : null;
   const plot = h("div", { class: "chart-plot" });
   const tableBox = h("div", { class: "chart-table", hidden: true });
@@ -315,7 +318,7 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
   function render() {
     const lines = series.map((sr) => ({ ...sr, pts: data[sr.key] || [] }));
     const last = lines[0].pts.at(-1);
-    now.textContent = last ? format(last[1]) : "";
+    now.textContent = headline ? headline(lines) : last ? format(last[1]) : "";
     plot.hidden = showTable;
     tableBox.hidden = !showTable;
     if (showTable) return renderTable(lines);
@@ -364,12 +367,25 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
     for (const t of niceTicks(x0, x1, Math.max(2, Math.floor(iw / 110)))) {
       axis.append(s("text", { x: X(t), y: H - 5, "text-anchor": "middle" }, fmt.compact(t)));
     }
+    // Reference marks: a hairline at a step, labelled at the top (e.g. "warmup ends").
+    for (const mark of opts.marks || []) {
+      if (!(mark.x > x0 && mark.x < x1)) continue;
+      const mx = X(mark.x);
+      const flip = mx > m.l + iw * 0.7;
+      axis.append(s("line", { class: "mark", x1: mx, x2: mx, y1: m.t, y2: m.t + ih }));
+      axis.append(s("text", { class: "mark-label", x: mx + (flip ? -5 : 5), y: m.t + ih - 6, "text-anchor": flip ? "end" : "start" }, mark.label));
+    }
     svg.append(axis);
 
     const plotG = s("g", { "clip-path": `url(#clip-${id})` });
-    for (const l of lines) {
+    // "Track" series (a plan or reference) draw first, wide and faint, under the data.
+    for (const l of [...lines].sort((a, b) => (b.track ? 1 : 0) - (a.track ? 1 : 0))) {
       if (!l.pts.length) continue;
       const d = "M" + l.pts.map((p) => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("L");
+      if (l.track) {
+        plotG.append(s("path", { class: "series", d, stroke: l.color, "stroke-width": 6, opacity: 0.3 }));
+        continue;
+      }
       plotG.append(s("path", { class: "series", d, stroke: l.color }));
       const dots = l.dots && l.pts.length <= 120 ? l.pts : [l.pts.at(-1)];
       for (const p of dots) {
@@ -591,7 +607,7 @@ function runsPage() {
         h("td", {}, h("a", { class: "run-name", href: `#/runs/${enc(r.name)}`, text: r.name }), h("div", { class: "sub", text: modelLabel(r.model) })),
         h("td", {}, runBadge(r.state)),
         h("td", {}, progressCell(r)),
-        tdNum(fmt.loss(r.loss)),
+        h("td", { class: "num" }, h("span", { class: "spark-cell" }, sparkline(r.loss_trend), fmt.loss(r.loss))),
         tdNum(fmt.loss(r.val_loss)),
         tdNum(fmt.pct(r.hellaswag)),
         tdNum(LIVE.has(r.state) ? fmt.rate(r.tokens_per_sec) : "—"),
@@ -684,8 +700,15 @@ function runPage(name) {
     lineChart({ title: "Throughput", zero: true, format: fmt.rate, tick: fmt.compact,
       series: [{ key: "perf/tokens_per_sec", label: "Tokens per second", color: "var(--series-1)" }] }),
     lineChart({ title: "Learning rate", zero: true, format: fmt.sci,
-      series: [{ key: "train/lr", label: "Learning rate", color: "var(--series-1)" }] }),
+      series: [
+        { key: "train/lr", label: "Actual", color: "var(--series-1)" },
+        { key: "plan/lr", label: "Planned", color: "var(--series-2)", track: true },
+      ] }),
   ];
+  const model3d = modelView();
+  const params3d = paramBar();
+  onLeave(() => model3d.destroy());
+  let plan = { points: [], marks: [] };
   const samples = h("div", { class: "panel" });
   const logPre = h("pre", { class: "log panel" });
   const ckBox = h("div", { class: "panel table-wrap" });
@@ -695,6 +718,7 @@ function runPage(name) {
     h("nav", { class: "crumbs", "aria-label": "Breadcrumb" }, h("a", { href: "#/runs", text: "Runs" }), " / ", name),
     tb.el, banner,
     h("div", { class: "charts" }, charts.map((c) => c.el)),
+    h("section", {}, h("h2", { text: "Model" }), h("div", { class: "panel model-panel" }, model3d.el, params3d.el)),
     h("div", { class: "two-col" },
       h("section", {}, h("h2", { text: "Samples" }), samples),
       h("section", {}, h("h2", { text: "Log" }), logPre)),
@@ -760,7 +784,13 @@ function runPage(name) {
       }
     }
     if (res.cursor) cursor = res.cursor;
-    for (const c of charts) c.update(series, { xMax: d.max_steps });
+    if (d.config && !plan.points.length) {
+      plan = lrPlan(d.config.train);
+      model3d.update(d.config.model);
+      params3d.update(modelSpec(d.config.model));
+    }
+    charts.forEach((c, i) => c.update(i === 3 ? { ...series, "plan/lr": plan.points } : series,
+      { xMax: d.max_steps, marks: i === 3 ? plan.marks : [] }));
 
     const prompts = (d.config && d.config.train && d.config.train.sample_prompts) || [];
     samples.replaceChildren(...(d.samples.length ? d.samples.map((smp) => {
@@ -816,6 +846,88 @@ function stat(k, v) {
 }
 
 // ---- new run ----------------------------------------------------------------------------
+// ---- shared visual helpers --------------------------------------------------------------
+// The learning rate at a 0-indexed step; mirrors gpt_lab/schedule.py's lr_at.
+function lrAt(step, t) {
+  const maxLr = t.lr;
+  const total = t.max_steps;
+  const warm = t.warmup_steps;
+  const minLr = maxLr * (t.min_lr_ratio || 0);
+  if (warm > 0 && step < warm) return (maxLr * (step + 1)) / warm;
+  if (t.schedule === "cosine") {
+    const p = Math.min(Math.max((step - warm) / Math.max(1, total - warm), 0), 1);
+    return minLr + 0.5 * (1 + Math.cos(Math.PI * p)) * (maxLr - minLr);
+  }
+  const decay = Math.max(1, Math.round(t.decay_frac * total));
+  const start = total - decay;
+  if (step < start) return maxLr;
+  return maxLr - (maxLr - minLr) * Math.min((step - start + 1) / decay, 1);
+}
+
+// The planned schedule as chart points, plus marks where its phases change.
+function lrPlan(t) {
+  const ok = t && [t.lr, t.max_steps, t.warmup_steps, t.decay_frac].every((v) => typeof v === "number" && isFinite(v));
+  if (!ok || t.max_steps < 1 || t.max_steps > 1e8) return { points: [], marks: [] };
+  const total = t.max_steps;
+  const n = Math.min(total, 320);
+  const steps = new Set(Array.from({ length: n }, (_, i) => Math.round((i * (total - 1)) / Math.max(1, n - 1))));
+  const marks = [];
+  if (t.warmup_steps > 0 && t.warmup_steps < total) {
+    steps.add(t.warmup_steps - 1).add(t.warmup_steps);
+    marks.push({ x: t.warmup_steps, label: `warmup ends ${fmt.int(t.warmup_steps)}` });
+  }
+  if (t.schedule !== "cosine") {
+    const start = total - Math.max(1, Math.round(t.decay_frac * total));
+    if (start > 0 && start > t.warmup_steps) {
+      steps.add(start - 1).add(start);
+      marks.push({ x: start, label: `decay starts ${fmt.int(start)}` });
+    }
+  }
+  const points = [...steps].filter((st) => st >= 0 && st < total).sort((a, b) => a - b).map((st) => [st, lrAt(st, t)]);
+  return { points, marks };
+}
+
+// Two bars on one scale: tokens the run will read, and tokens prepared on disk.
+function budgetBars() {
+  const el = h("div", { class: "budget" });
+  function update(read, available) {
+    if (!read) return fill(el);
+    const max = Math.max(read, available || 0);
+    const row = (label, value, color, note) =>
+      h("div", { class: "budget-row" },
+        h("span", { class: "budget-label", text: label }),
+        h("div", { class: "budget-track" }, h("span", { class: "budget-bar", style: { width: `${(100 * value) / max}%`, background: color } })),
+        h("span", { class: "budget-value", text: note }));
+    const passes = available ? read / available : null;
+    fill(el,
+      h("div", { class: "budget-title", text: "Training data budget" }),
+      row("Run reads", read, "var(--series-1)", fmt.compact(read)),
+      row("Prepared", available || 0, "var(--series-3)", available ? fmt.compact(available) : "none yet"),
+      h("p", { class: "sub", text: passes == null
+        ? "Prepare a dataset to train on."
+        : passes <= 1
+          ? `The run reads ${(passes * 100).toFixed(0)}% of the prepared data, so it sees each token at most once.`
+          : `The run reads the prepared data ${passes.toFixed(2)} times over, so it repeats examples.` }));
+  }
+  return { el, update };
+}
+
+// A small trend line for table rows.
+function sparkline(points, w = 72, ht = 20) {
+  if (!points || points.length < 2) return null;
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const [xa, xb] = [Math.min(...xs), Math.max(...xs)];
+  const [ya, yb] = [Math.min(...ys), Math.max(...ys)];
+  const X = (v) => 1 + ((v - xa) / (xb - xa || 1)) * (w - 6);
+  const Y = (v) => 2 + (1 - (v - ya) / (yb - ya || 1)) * (ht - 4);
+  const d = "M" + points.map((p) => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("L");
+  const last = points.at(-1);
+  return s("svg", { class: "spark", viewBox: `0 0 ${w} ${ht}`, width: w, height: ht, "aria-hidden": "true" },
+    s("path", { d, fill: "none", stroke: "var(--series-1)", "stroke-width": 1.5, "stroke-linejoin": "round" }),
+    s("circle", { cx: X(last[0]), cy: Y(last[1]), r: 2.5, fill: "var(--series-1)" }));
+}
+
 const LABELS = {
   "model.n_layer": "Layers",
   "model.d_model": "Width",
@@ -892,6 +1004,29 @@ async function newRunPage(params) {
   let values = {};
   let invalid = new Set();
 
+  // Visuals that follow the form: the model in 3D with its parameter breakdown, the
+  // learning-rate schedule, and the data budget. Built once and moved into their sections.
+  const model3d = modelView();
+  const params3d = paramBar();
+  const lrChart = lineChart({
+    title: "Learning rate schedule", zero: true, format: fmt.sci,
+    emptyText: "Set steps, warmup and the learning rate to see the schedule.",
+    headline: (lines) => (lines[0].pts.length ? `peak ${fmt.sci(Math.max(...lines[0].pts.map((p) => p[1])))}` : ""),
+    series: [{ key: "lr", label: "Learning rate", color: "var(--series-1)" }],
+  });
+  const budget = budgetBars();
+  onLeave(() => model3d.destroy());
+  const sectionValues = (name) => Object.fromEntries(Object.entries(values)
+    .filter(([key]) => key.startsWith(`${name}.`))
+    .map(([key, val]) => [key.slice(name.length + 1), val]));
+  function refreshVisuals() {
+    const mc = sectionValues("model");
+    model3d.update(mc);
+    params3d.update(modelSpec(mc));
+    const plan = lrPlan(sectionValues("train"));
+    lrChart.update({ lr: plan.points }, { xMax: values["train.max_steps"], marks: plan.marks });
+  }
+
   const runName = h("input", { class: "input", id: "run-name", spellcheck: "false", autocomplete: "off" });
   const presetBox = h("div", { class: "presets", role: "radiogroup", "aria-label": "Preset" });
   const groupsBox = h("div");
@@ -925,11 +1060,12 @@ async function newRunPage(params) {
     const presetValue = getKey(preset.config, f.key);
     const value = values[f.key];
     const changed = h("span", { class: "changed", hidden: JSON.stringify(value) === JSON.stringify(presetValue) });
-    changed.textContent = `changed from ${JSON.stringify(presetValue)}`;
+    changed.textContent = `changed from ${presetValue == null ? "none" : JSON.stringify(presetValue)}`;
     const wrap = h("div", { class: f.type === "str" && !f.choices ? "field full" : "field" });
     const set = (val) => {
       values[f.key] = val;
       changed.hidden = JSON.stringify(val) === JSON.stringify(presetValue);
+      refreshVisuals();
       scheduleCheck();
     };
     let input;
@@ -970,10 +1106,17 @@ async function newRunPage(params) {
   function renderFields() {
     const shown = new Set(GROUPS.flatMap(([, keys]) => keys));
     const rest = Object.keys(fields).filter((k) => !shown.has(k));
+    const visual = {
+      Model: () => h("div", { class: "panel model-panel" }, model3d.el, params3d.el),
+      Data: () => h("div", { class: "panel viz-panel" }, budget.el),
+      Training: () => lrChart.el,
+    };
     groupsBox.replaceChildren(
       ...GROUPS.map(([title, keys]) => h("section", { class: "form-section" },
         h("h2", { text: title }),
-        h("div", { class: "panel fields" }, keys.filter((k) => fields[k]).map((k) => fieldEl(fields[k]))))),
+        title === "Model" ? visual.Model() : null,
+        h("div", { class: "panel fields" }, keys.filter((k) => fields[k]).map((k) => fieldEl(fields[k]))),
+        title !== "Model" && visual[title] ? h("div", { class: "viz-after" }, visual[title]()) : null)),
       h("details", { class: "more" }, h("summary", { text: `All other settings (${rest.length})` }),
         h("div", { class: "panel fields", style: { marginTop: "12px" } }, rest.map((k) => fieldEl(fields[k])))));
   }
@@ -985,6 +1128,7 @@ async function newRunPage(params) {
     if (!runName.dataset.edited) runName.value = `${p.name}-${timestamp()}`;
     renderPresets();
     renderFields();
+    refreshVisuals();
     scheduleCheck(0);
   }
 
@@ -1030,6 +1174,7 @@ async function newRunPage(params) {
     }
     checking = false;
     const d = report.derived || {};
+    budget.update(d.total_tokens, d.train_tokens);
     const row = (k, val) => [h("dt", { text: k }), h("dd", { text: val })];
     facts.replaceChildren(...[
       row("Parameters", fmt.compact(d.params)),
@@ -1100,11 +1245,43 @@ function dataPage() {
     const actions = ds.key
       ? h("div", { class: "row" }, maxTokens ? h("label", { class: "field" }, h("span", { class: "fkey", text: "Tokens to prepare" }), maxTokens) : null, replaceRow, btn)
       : h("p", { class: "sub", text: "Found in data/. The UI doesn't prepare this one." });
+    const prepFill = h("span");
+    const prepText = h("span", { class: "sub" });
+    const prepBar = h("div", { class: "prep-progress", hidden: true },
+      h("div", { class: "bar", role: "progressbar", "aria-label": `${ds.title} tokens prepared` }, prepFill), prepText);
+    const strip = h("div", { class: "shard-strip", role: "img" });
+    const stripLegend = h("div", { class: "chart-legend", hidden: true },
+      h("span", {}, h("span", { class: "pbar-swatch", style: { background: "var(--series-1)" } }), "validation shard"),
+      h("span", {}, h("span", { class: "pbar-swatch", style: { background: "var(--series-3)" } }), "training shard"));
     const el = h("section", { class: "panel card" },
-      h("div", {}, h("h3", { text: ds.title }), h("span", { class: "path", text: ds.dir })), status, statsBox, actions);
+      h("div", {}, h("h3", { text: ds.title }), h("span", { class: "path", text: ds.dir })), status, prepBar,
+      h("div", {}, strip, stripLegend), statsBox, actions);
     return {
       el,
-      update(d) {
+      update(d, job) {
+        // One cell per shard file: validation first (it's written first), then training.
+        const cells = d.val_shards + d.train_shards;
+        strip.hidden = stripLegend.hidden = !cells;
+        if (strip.childElementCount !== cells) {
+          strip.replaceChildren(...Array.from({ length: Math.min(cells, 400) }, (_, i) =>
+            h("span", { class: `shard ${i < d.val_shards ? "val" : "train"}` })));
+        }
+        strip.setAttribute("aria-label", `${d.val_shards} validation and ${d.train_shards} training shards`);
+        strip.title = `${d.val_shards} validation shard${d.val_shards === 1 ? "" : "s"} (blue), ${d.train_shards} training (green)`;
+        // FineWeb-Edu shows how far its prep has got: shards land 100M tokens at a time.
+        if (ds.key === "fineweb") {
+          const prepared = d.train_tokens + d.val_tokens;
+          const i = job ? job.cmd.indexOf("--max-tokens") : -1;
+          const target = i >= 0 ? Number(job.cmd[i + 1]) : 1e10;
+          const show = !!job || (prepared > 0 && prepared < target * 0.95);
+          prepBar.hidden = !show;
+          if (show) {
+            const p = Math.min(1, prepared / target);
+            prepFill.style.width = `${p * 100}%`;
+            prepBar.firstChild.setAttribute("aria-valuenow", String(Math.round(p * 100)));
+            prepText.textContent = `${fmt.compact(prepared)} of ${i >= 0 ? "" : "about "}${fmt.compact(target)} tokens${job ? " · preparing" : " · stopped early"}`;
+          }
+        }
         status.textContent = d.train_shards || d.val_shards ? "" : "Not prepared yet.";
         status.hidden = !!(d.train_shards || d.val_shards);
         statsBox.replaceChildren(
@@ -1129,10 +1306,17 @@ function dataPage() {
         card = makeCard(ds);
         cardByDir.set(ds.dir, card);
       }
-      card.update(ds);
+      const job = prepJobs.find((j) => j.state === "running" && j.title.includes(ds.title));
+      card.update(ds, job);
       if (cards.children[i] !== card.el) cards.insertBefore(card.el, cards.children[i] || null);
     });
-    storage.replaceChildren(h("div", { class: "stats" },
+    const used = data.disk.total - data.disk.free;
+    storage.replaceChildren(
+      h("div", { class: "disk" },
+        h("div", { class: "bar", role: "img", "aria-label": `Disk ${Math.round((100 * used) / data.disk.total)}% used` },
+          h("span", { style: { width: `${(100 * used) / data.disk.total}%` } })),
+        h("span", { class: "sub", text: `${fmt.bytes(used)} used of ${fmt.bytes(data.disk.total)}` })),
+      h("div", { class: "stats" },
       stat("Free disk space", `${fmt.bytes(data.disk.free)} of ${fmt.bytes(data.disk.total)}`),
       stat("Download cache", fmt.bytes(data.hf_cache.bytes))),
       h("p", { class: "sub", style: { margin: 0 } }, "Hugging Face keeps the raw FineWeb-Edu download in ", h("code", { text: data.hf_cache.path }), ". Once the shards exist, training doesn't need it and you can delete it."));
@@ -1219,6 +1403,33 @@ async function evaluatePage(params) {
   every(5000, refresh);
 }
 
+// Horizontal bars per model for validation loss and HellaSwag, best first.
+function compareCharts(rows) {
+  const label = (r) => (r.reference ? `OpenAI ${r.name.replace(/^hf:/, "")}` : r.run);
+  const color = (r) => (r.reference ? "var(--series-3)" : "var(--series-1)");
+  const metric = (title, key, f, better) => {
+    const items = rows.filter((r) => r[key] != null);
+    if (!items.length) return null;
+    const max = Math.max(...items.map((r) => r[key]));
+    const sorted = [...items].sort((a, b) => (better === "Lower" ? a[key] - b[key] : b[key] - a[key]));
+    return h("section", { class: "panel chart-card" },
+      h("div", { class: "chart-head" }, h("span", { class: "chart-title", text: title }), h("span", { class: "chart-now sub", text: `${better} is better` })),
+      h("div", { class: "hbars", role: "list" }, sorted.map((r) =>
+        h("div", { class: "hbar-row", role: "listitem", title: `${label(r)}: ${f(r[key])}` },
+          h("span", { class: "hbar-label", text: label(r) }),
+          h("div", { class: "hbar-track" }, h("span", { class: "hbar-bar", style: { width: `${(100 * r[key]) / max}%`, background: color(r) } })),
+          h("span", { class: "hbar-value", text: f(r[key]) })))));
+  };
+  const charts = [metric("Validation loss", "val_loss", fmt.loss, "Lower"), metric("HellaSwag accuracy", "hellaswag", fmt.pct, "Higher")].filter(Boolean);
+  if (!charts.length) return null;
+  const kinds = [...new Set(rows.map((r) => r.reference))].sort();
+  return h("div", { class: "compare-charts" },
+    kinds.length > 1
+      ? h("div", { class: "chart-legend" }, kinds.map((ref) => h("span", {}, h("span", { class: "pbar-swatch", style: { background: ref ? "var(--series-3)" : "var(--series-1)" } }), ref ? " OpenAI GPT-2" : " Your runs")))
+      : null,
+    h("div", { class: "charts" }, charts));
+}
+
 function compareTable({ rows, tasks }) {
   if (!rows.length) {
     return h("div", { class: "panel empty" }, h("h3", { text: "No evaluations yet" }),
@@ -1236,6 +1447,7 @@ function compareTable({ rows, tasks }) {
     return [key, vals.length > 1 ? (dir === "min" ? Math.min(...vals) : Math.max(...vals)) : null];
   }));
   return h("div", {},
+    compareCharts(rows),
     h("div", { class: "panel table-wrap" }, h("table", { class: "grid" },
       h("thead", {}, h("tr", {}, th("Model"), th("Checkpoint", "num"), th("Parameters", "num"), cols.map(([, label]) => th(label, "num")))),
       h("tbody", {}, sorted.map((r) => h("tr", {},

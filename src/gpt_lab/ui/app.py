@@ -472,6 +472,15 @@ def create_app(root: Path) -> FastAPI:
         return {**result, "run": req.run, "checkpoint": file}
 
     # -- pages ----------------------------------------------------------------------------
+    @app.middleware("http")
+    async def revalidate_static(request, call_next):
+        # Modules import each other without version stamps, so the browser must check
+        # every time (a 304 when nothing changed) or it could mix old and new files.
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)

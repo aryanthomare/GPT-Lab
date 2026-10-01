@@ -200,8 +200,11 @@ def check(root: Path, cfg: Config, run_name: str, *, new: bool) -> dict[str, Any
     train_tokens = sum(shard_tokens(f) for f in train_files)
     total_tokens = tc.max_steps * tc.total_batch_tokens
     if train_tokens and total_tokens > train_tokens:
+        ratio = total_tokens / train_tokens
         warnings.append(
-            f"The run reads {total_tokens / train_tokens:.1f}× the training data, so it repeats examples."
+            f"The run reads {100 * (ratio - 1):.0f}% more tokens than are prepared, so some examples repeat."
+            if ratio < 1.1
+            else f"The run reads {ratio:.1f}× the training data, so it repeats examples."
         )
 
     return {
