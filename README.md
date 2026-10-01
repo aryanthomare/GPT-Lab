@@ -119,9 +119,15 @@ A modern architecture should match or beat that.
 
 ## Web UI
 
-A local web app for everything above: start runs from a preset (with any setting changed),
-watch loss, HellaSwag, throughput and samples live, stop and resume, prepare datasets,
-evaluate checkpoints against GPT-2, and generate text.
+A local web app for everything above: start runs from a preset (with any setting changed,
+and the model drawn in 3D as you edit it), watch loss, HellaSwag, throughput and samples,
+stop and resume, prepare datasets, evaluate checkpoints against GPT-2, and generate text.
+
+Each run also has a **live window** (Live window on its page, or the Live tab): one screen
+refreshed every two seconds with the current step, loss, throughput, time left, a timeline
+of the run's schedule, evaluations and checkpoints, charts of loss, learning rate, gradient
+norm, throughput and HellaSwag, the GPU's utilization, memory, temperature and power over
+the last half hour, the latest samples, the log, and a list of events.
 
 ```bash
 pip install -e ".[ui]"
@@ -147,7 +153,8 @@ fields and defaults). Any field can be overridden with `--section.key=value`, fo
 `--model.n_kv_head=4 --train.lr=1.5e-3`. Each run directory `runs/<run_name>/` stores the
 resolved `config.yaml`, the git commit, TensorBoard logs, checkpoints and `eval.json`, plus
 two files for tools that follow a run: `metrics.jsonl` (every logged metric and text sample,
-one JSON object per line) and `status.json` (state, step, process ID, latest checkpoint).
+one JSON object per line) and `status.json` (state, step, process ID, latest checkpoint, and
+the latest step's loss, learning rate and duration, updated every step).
 
 ## Development
 

@@ -13,6 +13,7 @@ from gpt_lab.config import save_config  # noqa: E402
 from gpt_lab.data import write_shard  # noqa: E402
 from gpt_lab.ui.app import create_app  # noqa: E402
 from gpt_lab.ui.jobs import JobError, JobManager  # noqa: E402
+from gpt_lab.ui.telemetry import parse_line  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="the UI runs jobs as POSIX sessions"
@@ -58,6 +59,15 @@ def start(client, name, **overrides):
 
 def run_state(client, name):
     return client.get(f"/api/runs/{name}").json()
+
+
+def test_gpu_history_endpoint_and_parsing(client):
+    out = client.get("/api/system/history", params={"since": 0}).json()
+    assert isinstance(out["samples"], list) and out["interval"] == 2  # empty without a GPU
+    line = "NVIDIA GeForce RTX 5080, 97, 13021, 16303, 68, [N/A]"
+    sample = parse_line(line, 123.0)
+    assert sample["util"] == 97 and sample["mem_total_mb"] == 16303 and sample["power_w"] is None
+    assert parse_line("not, enough", 1.0) is None
 
 
 def test_rejects_requests_for_other_hosts(lab):

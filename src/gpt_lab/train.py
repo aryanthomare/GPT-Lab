@@ -99,6 +99,9 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
         "step": 0,
         "max_steps": tc.max_steps,
         "end_step": None,
+        "loss": None,  # the latest step's loss, learning rate and wall time
+        "lr": None,
+        "step_seconds": None,
         "last_checkpoint": None,
         "error": None,
     }
@@ -244,6 +247,7 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
             # SIGTERM (from process managers, or a UI's stop button) takes the Ctrl-C path.
             prev_sigterm = signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
         for step in range(start_step, end_step):
+            t_step = time.time()
             if is_cuda:
                 torch.cuda.reset_peak_memory_stats()
             model.train()
@@ -282,7 +286,8 @@ def train(cfg: Config, resume: bool = False, stop_at: int | None = None) -> dict
                 raise FloatingPointError(f"loss is {loss_val} at step {step}")
             completed = step + 1
             tokens_since += tc.total_batch_tokens
-            set_status(step=completed)
+            # Every step, not just logged ones, so a live view can follow along.
+            set_status(step=completed, loss=loss_val, lr=lr, step_seconds=time.time() - t_step)
 
             if tc.log_every and (completed % tc.log_every == 0 or completed == end_step):
                 dt = time.time() - t_last

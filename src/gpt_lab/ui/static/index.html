@@ -26,6 +26,7 @@
       <a href="#/data" data-nav="data">Data</a>
       <a href="#/evaluate" data-nav="evaluate">Evaluate</a>
       <a href="#/generate" data-nav="generate">Generate</a>
+      <a href="#/live" data-nav="live">Live</a>
     </nav>
     <div class="gpu" id="gpu"></div>
     <details class="menu" id="menu">
@@ -57,6 +58,8 @@
       <button type="button" class="btn primary" id="shutdown-confirm">Shut down</button>
     </div>
   </dialog>
-  <script type="module" src="/static/app.js?v={{v}}"></script>
+  <!-- No version stamp: live.js imports "./app.js" and must get this same module instance.
+       The server sends Cache-Control: no-cache, so edits still load. -->
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>

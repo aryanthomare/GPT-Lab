@@ -400,6 +400,65 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
 .hbar-bar { display: block; height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; }
 .hbar-value { font: 12.5px var(--font-mono); text-align: right; }
 
+/* ---- live training window ---------------------------------------------------------- */
+body.live-mode .topbar { display: none; }
+body.live-mode main { max-width: none; padding: 14px 20px 32px; }
+.live-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 14px; }
+.live-name { margin: 0; font: 700 22px/1.2 var(--font-mono); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.live-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 9px;
+  border: 1.5px solid var(--frame);
+  border-radius: 3px;
+  font: 700 11px var(--font-mono);
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.live-mark .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.live-mark.on { color: var(--ink); }
+.live-mark.on .dot { background: var(--good); animation: pulse 1.8s ease-in-out infinite; }
+.live-links { margin-left: auto; display: flex; gap: 8px; }
+/* Tiles share the title block's look: ink rules between cells. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--frame);
+  border: 2px solid var(--frame);
+}
+.tile { display: grid; align-content: start; gap: 1px; min-width: 0; padding: 9px 12px 10px; background: var(--sheet); }
+.tile .k { font: 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.tile .v { font: 24px/1.2 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .sub { font: 11px var(--font-mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-spark { display: block; height: 26px; margin-top: 4px; overflow: hidden; }
+@media (max-width: 1500px) { .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.timeline-panel { margin-top: 14px; padding: 10px 14px 8px; }
+.timeline-wrap { position: relative; }
+.timeline svg { display: block; width: 100%; }
+.timeline .tl-label { font: 10.5px var(--font-mono); fill: var(--muted); letter-spacing: 0.06em; }
+.timeline .tl-now { font: 700 11px var(--font-mono); fill: var(--ink); }
+.timeline-wrap .tooltip { max-width: 260px; white-space: normal; }
+.live-charts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.live-charts .loss { grid-column: span 2; grid-row: span 2; }
+@media (max-width: 1250px) {
+  .live-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .live-charts .loss { grid-row: auto; }
+}
+@media (max-width: 700px) {
+  .live-charts { grid-template-columns: 1fr; }
+  .live-charts .loss { grid-column: auto; }
+}
+.live-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); gap: 0 14px; }
+@media (max-width: 1100px) { .live-bottom { grid-template-columns: 1fr; } }
+.live-samples, .live-log, .events { max-height: 340px; overflow: auto; }
+.events { list-style: none; margin: 0; padding: 0; }
+.event { display: flex; gap: 10px; align-items: baseline; padding: 8px 14px; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+.event:last-child { border-bottom: 0; }
+.event svg { width: 12px; height: 12px; flex: none; position: relative; top: 1px; }
+
 .shard-strip { display: flex; flex-wrap: wrap; gap: 2px; }
 .shard { width: 9px; height: 9px; border-radius: 2px; background: var(--series-3); }
 .shard.val { background: var(--series-1); }

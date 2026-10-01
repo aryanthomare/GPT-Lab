@@ -210,6 +210,7 @@ const routes = [
   [/^#\/data$/, () => dataPage()],
   [/^#\/evaluate(?:\?(.*))?$/, (m) => evaluatePage(new URLSearchParams(m[1] || ""))],
   [/^#\/generate(?:\?(.*))?$/, (m) => generatePage(new URLSearchParams(m[1] || ""))],
+  [/^#\/live(?:\/([^/?]+))?$/, (m) => import("./live.js").then((mod) => mod.livePage(m[1] ? decodeURIComponent(m[1]) : null))],
   [/^(?:#\/?(?:runs)?)?$/, () => runsPage()],
 ];
 
@@ -281,7 +282,11 @@ function nearest(pts, x) {
 let chartIds = 0;
 
 // A line chart over metric series. update(seriesByKey, {xMax}) redraws it.
-function lineChart({ title, series, format, tick = format, clip = false, zero = false, emptyText = "Nothing logged yet.", headline = null }) {
+// xMin: 0 for step axes, "auto" to start at the first point (time axes).
+function lineChart({
+  title, series, format, tick = format, clip = false, zero = false, emptyText = "Nothing logged yet.", headline = null,
+  xMin = 0, xTick = fmt.compact, xLabel = (v) => `Step ${fmt.int(v)}`, height = 200,
+}) {
   const id = ++chartIds;
   const now = h("span", { class: "chart-now" });
   const tableBtn = h("button", { class: "btn small quiet", type: "button", "aria-pressed": "false", text: "Table" });
@@ -324,22 +329,28 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
     if (showTable) return renderTable(lines);
     const primary = lines.find((l) => l.pts.length);
     if (!primary) {
-      plot.replaceChildren(h("div", { class: "chart-empty", text: emptyText }));
+      plot.replaceChildren(h("div", { class: "chart-empty", text: emptyText, style: { height: `${height}px` } }));
       return;
     }
     const W = Math.max(280, plot.clientWidth || 600);
-    const H = 200;
+    const H = height;
     const m = { t: 8, r: 14, b: 22, l: 52 };
     const iw = W - m.l - m.r;
     const ih = H - m.t - m.b;
 
-    let xMaxSeen = 0;
-    for (const l of lines) for (const p of l.pts) xMaxSeen = Math.max(xMaxSeen, p[0]);
-    const x0 = 0;
-    const x1 = Math.max(opts.xMax || 0, xMaxSeen, 1);
+    let xMaxSeen = -Infinity;
+    let xMinSeen = Infinity;
+    for (const l of lines) {
+      for (const p of l.pts) {
+        xMaxSeen = Math.max(xMaxSeen, p[0]);
+        xMinSeen = Math.min(xMinSeen, p[0]);
+      }
+    }
+    const x0 = xMin === "auto" ? xMinSeen : 0;
+    const x1 = Math.max(opts.xMax || 0, xMaxSeen, x0 + 1);
     // Leave the first stretch of training (a huge early loss) out of the y range.
     let ys = [];
-    const cut = clip ? xMaxSeen * 0.1 : -Infinity;
+    const cut = clip ? x0 + (xMaxSeen - x0) * 0.1 : -Infinity;
     for (const l of lines) for (const p of l.pts) if (p[0] >= cut) ys.push(p[1]);
     if (ys.length < 3) ys = lines.flatMap((l) => l.pts.map((p) => p[1]));
     let y0 = Math.min(...ys);
@@ -356,7 +367,7 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
     const X = (v) => m.l + ((v - x0) / (x1 - x0)) * iw;
     const Y = (v) => m.t + (1 - (v - y0) / (y1 - y0)) * ih;
 
-    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", tabindex: 0, "aria-label": `${title}: ${last ? format(last[1]) : "no data"} at step ${last ? fmt.int(last[0]) : 0}` });
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, style: `height:${H}px`, role: "img", tabindex: 0, "aria-label": `${title}: ${last ? format(last[1]) : "no data"} at ${last ? xLabel(last[0]).toLowerCase() : "the start"}` });
     svg.append(s("defs", {}, s("clipPath", { id: `clip-${id}` }, s("rect", { x: m.l, y: m.t - 4, width: iw, height: ih + 8 }))));
     const axis = s("g", { class: "axis" });
     for (const t of niceTicks(y0, y1, 4)) {
@@ -365,15 +376,22 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
     }
     axis.append(s("line", { class: "baseline", x1: m.l, x2: W - m.r, y1: m.t + ih, y2: m.t + ih }));
     for (const t of niceTicks(x0, x1, Math.max(2, Math.floor(iw / 110)))) {
-      axis.append(s("text", { x: X(t), y: H - 5, "text-anchor": "middle" }, fmt.compact(t)));
+      axis.append(s("text", { x: X(t), y: H - 5, "text-anchor": "middle" }, xTick(t)));
     }
-    // Reference marks: a hairline at a step, labelled at the top (e.g. "warmup ends").
+    // Reference marks: a hairline at a step, labelled near the bottom (e.g. "warmup ends").
+    // A label that would overlap an earlier one moves up a line.
+    const placed = [];
     for (const mark of opts.marks || []) {
       if (!(mark.x > x0 && mark.x < x1)) continue;
       const mx = X(mark.x);
       const flip = mx > m.l + iw * 0.7;
+      const width = mark.label.length * 6.6;
+      const span = flip ? [mx - 5 - width, mx - 5] : [mx + 5, mx + 5 + width];
+      let row = 0;
+      while (placed.some((p) => p.row === row && p.span[0] < span[1] + 6 && span[0] < p.span[1] + 6)) row++;
+      placed.push({ span, row });
       axis.append(s("line", { class: "mark", x1: mx, x2: mx, y1: m.t, y2: m.t + ih }));
-      axis.append(s("text", { class: "mark-label", x: mx + (flip ? -5 : 5), y: m.t + ih - 6, "text-anchor": flip ? "end" : "start" }, mark.label));
+      axis.append(s("text", { class: "mark-label", x: flip ? span[1] : span[0], y: m.t + ih - 6 - row * 13, "text-anchor": flip ? "end" : "start" }, mark.label));
     }
     svg.append(axis);
 
@@ -417,7 +435,7 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
         const note = p[0] !== step ? ` · step ${fmt.int(p[0])}` : "";
         rows.push(h("div", { class: "tt-row" }, h("span", { class: "key", style: { background: l.color } }), h("strong", { text: format(p[1]) }), h("span", { class: "tt-label", text: l.label + note })));
       });
-      tip.replaceChildren(h("div", { class: "tt-head", text: `Step ${fmt.int(step)}` }), ...rows);
+      tip.replaceChildren(h("div", { class: "tt-head", text: xLabel(step) }), ...rows);
       tip.hidden = false;
       const scale = svg.getBoundingClientRect().width / W || 1;
       const left = hx * scale;
@@ -462,8 +480,8 @@ function lineChart({ title, series, format, tick = format, clip = false, zero = 
     const byStep = lines.map((l) => new Map(l.pts.map((p) => [p[0], p[1]])));
     const steps = [...new Set(lines.flatMap((l) => l.pts.map((p) => p[0])))].sort((a, b) => b - a).slice(0, 40);
     tableBox.replaceChildren(h("table", { class: "grid" },
-      h("thead", {}, h("tr", {}, th("Step", "num"), lines.map((l) => th(l.label, "num")))),
-      h("tbody", {}, steps.map((st) => h("tr", {}, tdNum(fmt.int(st)), byStep.map((mp) => tdNum(mp.has(st) ? format(mp.get(st)) : "—")))))));
+      h("thead", {}, h("tr", {}, th(xMin === "auto" ? "Time" : "Step", "num"), lines.map((l) => th(l.label, "num")))),
+      h("tbody", {}, steps.map((st) => h("tr", {}, tdNum(xMin === "auto" ? xTick(st) : fmt.int(st)), byStep.map((mp) => tdNum(mp.has(st) ? format(mp.get(st)) : "—")))))));
   }
 
   return { el, update };
@@ -605,7 +623,10 @@ function runsPage() {
       const go = () => (location.hash = `#/runs/${enc(r.name)}`);
       return h("tr", { class: "link", onclick: go },
         h("td", {}, h("a", { class: "run-name", href: `#/runs/${enc(r.name)}`, text: r.name }), h("div", { class: "sub", text: modelLabel(r.model) })),
-        h("td", {}, runBadge(r.state)),
+        h("td", {}, runBadge(r.state), LIVE.has(r.state)
+          ? h("div", {}, h("a", { class: "sub", href: `#/live/${enc(r.name)}`, text: "Open live window",
+              onclick: (e) => { e.preventDefault(); e.stopPropagation(); openLive(r.name); } }))
+          : null),
         h("td", {}, progressCell(r)),
         h("td", { class: "num" }, h("span", { class: "spark-cell" }, sparkline(r.loss_trend), fmt.loss(r.loss))),
         tdNum(fmt.loss(r.val_loss)),
@@ -665,7 +686,7 @@ function titleBlock(name) {
     const key = `${d.state}|${d.checkpoints.length > 0}`;
     if (key === actionsKey) return;
     actionsKey = key;
-    const btns = [];
+    const btns = [h("button", { class: LIVE.has(d.state) ? "btn primary" : "btn", type: "button", text: "Live window", onclick: () => openLive(name) })];
     if (LIVE.has(d.state)) btns.push(h("button", { class: "btn", type: "button", text: "Stop and save", onclick: handlers.stop }));
     else if (d.state !== "finished" && d.checkpoints.length) btns.push(h("button", { class: "btn primary", type: "button", text: "Resume", onclick: handlers.resume }));
     if (d.checkpoints.length) {
@@ -1614,6 +1635,21 @@ async function shutdown(force) {
 }
 confirmBtn.addEventListener("click", () => shutdown(false));
 forceBtn.addEventListener("click", () => shutdown(true));
+
+// Opens a run's live view in a window of its own (one per run, reused if already open).
+function openLive(name) {
+  const url = `/#/live/${enc(name)}`;
+  const win = window.open(url, `gptlab-live-${name}`, "popup=yes,width=1600,height=1000");
+  if (!win) location.hash = `#/live/${enc(name)}`; // popups blocked: open it here instead
+}
+
+// For live.js, which this file loads on demand. Both share one module instance because
+// index.html loads app.js without a query string.
+export {
+  api, append, enc, every, fill, fmt, h, ICONS, LIVE, lineChart, lrPlan, onLeave, openLive,
+  pageHead, runBadge, s, setLog, sparkline, stat, stillOn, toast,
+};
+export const currentToken = () => routeToken;
 
 window.addEventListener("hashchange", route);
 route();

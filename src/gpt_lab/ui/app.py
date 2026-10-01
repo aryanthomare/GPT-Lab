@@ -7,10 +7,10 @@ so it can be restarted at any time without affecting running jobs.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import signal
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,9 +24,10 @@ from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from gpt_lab.config import save_config
-from gpt_lab.ui import configs, datasets, runs
+from gpt_lab.ui import configs, datasets, runs, telemetry
 from gpt_lab.ui.jobs import JobError, JobManager, process_running
 from gpt_lab.ui.sampling import Sampler
+from gpt_lab.ui.telemetry import GpuSampler
 
 STATIC = Path(__file__).parent / "static"
 HF_MODELS = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
@@ -75,13 +76,6 @@ def fail(status: int, message: str) -> NoReturn:
     raise HTTPException(status, message)
 
 
-def _number(text: str) -> float | None:
-    try:
-        return float(text)
-    except ValueError:
-        return None  # nvidia-smi prints "[N/A]" for unsupported fields
-
-
 def create_app(root: Path) -> FastAPI:
     root = Path(root).resolve()
     runs_dir = root / "runs"
@@ -103,7 +97,17 @@ def create_app(root: Path) -> FastAPI:
 
     jobs = JobManager(root, external_gpu_user)
     sampler = Sampler()
-    app = FastAPI(title="GPT-Lab", docs_url=None, redoc_url=None, openapi_url=None)
+    gpu_history = GpuSampler()
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI):
+        gpu_history.start()
+        yield
+        gpu_history.stop()
+
+    app = FastAPI(
+        title="GPT-Lab", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
+    )
     # Only answer requests addressed to this machine (protects against DNS rebinding).
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
     app.state.server = None  # set by __main__, so /api/shutdown can stop uvicorn
@@ -129,30 +133,13 @@ def create_app(root: Path) -> FastAPI:
     gpu_cache: dict[str, Any] = {"at": 0.0, "value": None}
 
     def gpu_info() -> dict[str, Any] | None:
-        if time.time() - gpu_cache["at"] < 2.0:
-            return gpu_cache["value"]
-        value = None
-        query = "name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw"
-        try:
-            out = subprocess.run(
-                ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            ).stdout.splitlines()[0]
-            name, util, used, total, temp, power = (s.strip() for s in out.split(","))
-            value = {
-                "name": name,
-                "util": _number(util),
-                "mem_used_mb": _number(used),
-                "mem_total_mb": _number(total),
-                "temp_c": _number(temp),
-                "power_w": _number(power),
-            }
-        except (OSError, subprocess.SubprocessError, IndexError, ValueError):
-            pass
-        gpu_cache.update(at=time.time(), value=value)
-        return value
+        latest = gpu_history.latest()
+        if latest:
+            return latest
+        # The recorder hasn't produced a reading yet: ask nvidia-smi once (cached 2 s).
+        if time.time() - gpu_cache["at"] >= 2.0:
+            gpu_cache.update(at=time.time(), value=telemetry.read_gpu())
+        return gpu_cache["value"]
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -177,6 +164,15 @@ def create_app(root: Path) -> FastAPI:
             "cpus": os.cpu_count(),
             "disk": {"free": disk.free, "total": disk.total},
             "running_jobs": len(jobs.running()),
+        }
+
+    @app.get("/api/system/history")
+    def system_history(since: float = 0.0) -> dict[str, Any]:
+        """GPU readings newer than `since` (a Unix time), from the last hour."""
+        return {
+            "samples": gpu_history.since(since),
+            "interval": gpu_history.interval,
+            "now": time.time(),
         }
 
     @app.post("/api/shutdown")

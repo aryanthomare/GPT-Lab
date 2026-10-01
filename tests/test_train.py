@@ -52,6 +52,8 @@ def test_smoke_run_learns_and_writes_outputs(tiny_config):
     assert status["state"] == "finished"
     assert status["step"] == 30
     assert status["last_checkpoint"] == "checkpoints/step_000030.pt"
+    assert status["loss"] == losses[-1]  # the latest step, for live views
+    assert status["lr"] is not None and status["step_seconds"] > 0
 
 
 def test_resume_is_exact(tiny_config, tmp_path):
