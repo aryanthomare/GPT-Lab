@@ -3,7 +3,7 @@ import json
 import pytest
 import torch
 
-from gpt_lab.evals.hellaswag import evaluate_hellaswag, render_example
+from gpt_lab.evals.hellaswag import evaluate_hellaswag, parquet_to_jsonl, render_example
 from gpt_lab.evals.val_loss import evaluate_val_loss
 from gpt_lab.generate import generate
 from gpt_lab.model import Transformer
@@ -45,6 +45,32 @@ def test_hellaswag_picks_preferred_ending(tmp_path):
     model = PreferTokenModel(char_encode("z")[0])
     out = evaluate_hellaswag(model, path, encode=char_encode)
     assert out == {"hellaswag_acc": 1.0, "hellaswag_acc_norm": 1.0, "hellaswag_n": 1}
+
+
+def test_hellaswag_parquet_converts_to_scoreable_jsonl(tmp_path):
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
+    # The Hugging Face copy's layout: extra columns, and the label stored as a string.
+    table = pa.table(
+        {
+            "ind": [7],
+            "activity_label": ["x"],
+            "ctx_a": ["a"],
+            "ctx_b": ["b"],
+            "ctx": [EXAMPLE["ctx"]],
+            "endings": [EXAMPLE["endings"]],
+            "label": ["1"],
+        }
+    )
+    pq.write_table(table, tmp_path / "val.parquet")
+    assert parquet_to_jsonl(tmp_path / "val.parquet", tmp_path / "val.jsonl") == 1
+    row = json.loads((tmp_path / "val.jsonl").read_text())
+    assert row == {"ind": 7, **EXAMPLE}
+    model = PreferTokenModel(char_encode("z")[0])
+    assert (
+        evaluate_hellaswag(model, tmp_path / "val.jsonl", encode=char_encode)["hellaswag_acc"]
+        == 1.0
+    )
 
 
 def test_val_loss_is_deterministic(shard_dir, model_cfg):

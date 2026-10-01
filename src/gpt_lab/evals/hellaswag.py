@@ -19,9 +19,28 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
+# The author's copy on Hugging Face. The original GitHub copy (rowanz/hellaswag) is no
+# longer available (HTTP 451 for the repository, 404 for its raw files).
 HELLASWAG_VAL_URL = (
-    "https://raw.githubusercontent.com/rowanz/hellaswag/master/data/hellaswag_val.jsonl"
+    "https://huggingface.co/datasets/Rowan/hellaswag/resolve/main/data/"
+    "validation-00000-of-00001.parquet"
 )
+
+
+def parquet_to_jsonl(src: str | Path, dst: str | Path) -> int:
+    """Write the fields the scorer uses as JSON lines; returns the number of examples.
+
+    Needs pyarrow, which the [data] and [eval] extras install (through `datasets`).
+    """
+    import pyarrow.parquet as pq
+
+    rows = pq.read_table(src).to_pylist()
+    with open(dst, "w") as f:
+        for r in rows:
+            out = {"ind": r.get("ind"), "ctx": r["ctx"], "endings": list(r["endings"])}
+            out["label"] = int(r["label"])  # stored as "0".."3" on Hugging Face
+            f.write(json.dumps(out) + "\n")
+    return len(rows)
 
 
 def download_hellaswag(path: str | Path) -> Path:
@@ -29,9 +48,16 @@ def download_hellaswag(path: str | Path) -> Path:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[hellaswag] downloading {HELLASWAG_VAL_URL} -> {path}")
+        parquet = path.with_suffix(".parquet.tmp")
         tmp = path.with_suffix(".tmp")
-        urllib.request.urlretrieve(HELLASWAG_VAL_URL, tmp)
-        tmp.replace(path)
+        try:
+            urllib.request.urlretrieve(HELLASWAG_VAL_URL, parquet)
+            n = parquet_to_jsonl(parquet, tmp)
+            tmp.replace(path)
+            print(f"[hellaswag] wrote {n:,} examples")
+        finally:
+            parquet.unlink(missing_ok=True)
+            tmp.unlink(missing_ok=True)
     return path
 
 
